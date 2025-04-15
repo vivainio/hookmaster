@@ -27,7 +27,7 @@ to
 
 `SOMETICKET-123: Do stuff`
 
-The hooks themselves relay the call to hookmaster, e.g. pre-commit-message hooks created by hookmaster looks like this:
+The hooks themselves relay the call to hookmaster, e.g. prepare-commit-message hooks created by hookmaster looks like this:
 
 ```sh
 #!/bin/sh
