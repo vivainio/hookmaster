@@ -7,9 +7,7 @@ import sys
 
 ROOT = Path(__file__).parent
 
-hook_files = {
-    "prepare-commit-msg": 'hookmaster prepare-commit-msg "$@"'
-}
+hook_files = {"prepare-commit-msg": 'hookmaster prepare-commit-msg "$@"'}
 
 
 def add_hooks_to_project(path: Path):
@@ -24,7 +22,6 @@ def add_hooks_to_project(path: Path):
 
 
 def summary_line_for_branch(branch: str) -> str:
-
     if branch in ["HEAD", "master", "main", "dev"]:
         return "Straight commit to " + branch
     ticket = re.search(r"[A-Z]+-\d+", branch)

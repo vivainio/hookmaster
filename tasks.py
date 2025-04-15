@@ -32,6 +32,7 @@ def do_test(_args: list[str]) -> None:
     os.chdir("test")
     c("pytest")
 
+
 def do_publish(args) -> None:
     shutil.rmtree("dist", ignore_errors=True)
     c(["fistbump", "--check"])
