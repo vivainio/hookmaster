@@ -1,6 +1,9 @@
 from argparse import ArgumentParser
 from pathlib import Path
 import shutil
+import subprocess
+
+
 ROOT = Path(__file__).parent
 
 simple_hooks = list(ROOT.glob("hooks/*"))
@@ -20,7 +23,7 @@ def prepare_commit_msg(current_message_file: Path):
     with open(current_message_file, "r") as f:
         message = f.read()
 
-    branch = subprocess.run(["git", "rev-parse", "--symbolic-ref", "HEAD"], capture_output=True, text=True).stdout.strip()
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     # Modify the message as needed
     modified_message = f"This is a hookmaster commit message. Branch {branch}\n\n" + message
 
