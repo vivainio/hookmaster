@@ -23,7 +23,7 @@ def add_hooks_to_project(path: Path):
 
 def summary_line_for_branch(branch: str) -> str:
     if branch in ["HEAD", "master", "main", "dev"]:
-        return "Straight commit to " + branch
+        return "Commit to: " + branch
     ticket = re.search(r"[A-Z]+-\d+", branch)
     if not ticket:
         return branch
