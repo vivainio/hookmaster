@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Get the current branch name
+BRANCH_NAME=$(git symbolic-ref --short HEAD)
+
+# Extract the ticket number from the branch name
+# This regex matches any uppercase string followed by a hyphen and numbers
+TICKET=$(echo $BRANCH_NAME | grep -oE '[A-Z]+-[0-9]+')
+
+# Check if a ticket number was found
+if [ -n "$TICKET" ]; then
+    # Append the ticket number to the commit message
+    echo "$TICKET" >> "$1"
+else
+    # Append the entire branch name if no ticket number is found
+    echo "$BRANCH_NAME" >> "$1"
+fi

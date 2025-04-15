@@ -1,2 +1,3 @@
+from . import cli
 def main():
-    print("hello world")
+    cli.main()
