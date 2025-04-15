@@ -2,8 +2,13 @@
 
 Some nice git hooks for your pleasure. 
 
-Problem: you have a policy where every commit message should mention the jira ticket it applies to. You 
+Problem: 
+
+- You have a policy where every commit message should mention the jira ticket it applies to. You 
 have them in the branch name, and can't be arsed to type them manually to each commit message.
+Hookmaster provides you with a nice "default" commit message formatter in prepare-commit-msg hook.
+- You want to specify commands to run as different git hooks, in a file you share with 
+your team in git.
 
 ## Installation
 
@@ -27,12 +32,21 @@ to
 
 `SOMETICKET-123: Do stuff`
 
-The hooks themselves relay the call to hookmaster, e.g. prepare-commit-message hooks created by hookmaster looks like this:
+The hooks themselves relay the call to hookmaster, e.g. prepare-commit-msg hooks created by hookmaster looks like this:
 
 ```sh
 #!/bin/sh
 hookmaster prepare-commit-msg "$@"
 ```
 
-This delegates the message creation to globally installed hookmaster application. This means fixes to hookmaster benefit all your 
-repositories at once.
+This delegates the message creation to globally installed hookmaster application. This means fixes to hookmaster benefit all your repositories at once.
+
+## githooks.toml
+
+For any other hooks, you can specify them in githooks.toml:
+
+```toml
+pre-commit = "python tasks.py format"
+```
+
+The format should be obvious.
