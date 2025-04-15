@@ -7,18 +7,20 @@ import sys
 
 ROOT = Path(__file__).parent
 
-simple_hooks = list(ROOT.glob("hooks/*"))
+hook_files = {
+    "prepare-commit-msg": 'hookmaster prepare-commit-msg "$@"'
+}
 
 
 def add_hooks_to_project(path: Path):
     target_paths = path.glob("**/.git/hooks")
-
     for t in target_paths:
         print("Hooking directory:", t)
 
-        for hook in simple_hooks:
-            print(">", t)
-            shutil.copy(hook, t)
+        for hook_name, cont in hook_files.items():
+            target_hook_file = t / hook_name
+            print(">", target_hook_file)
+            target_hook_file.write_text(f"#!/bin/sh\n{cont}\n")
 
 
 def summary_line_for_branch(branch: str) -> str:
