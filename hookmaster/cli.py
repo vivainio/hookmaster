@@ -22,6 +22,9 @@ def add_hooks_to_project(path: Path):
 
 
 def summary_line_for_branch(branch: str) -> str:
+
+    if branch in ["HEAD", "master", "main", "dev"]:
+        return "Straight commit to " + branch
     ticket = re.search(r"[A-Z]+-\d+", branch)
     if not ticket:
         return branch
@@ -40,7 +43,6 @@ def prepare_commit_msg(current_message_file: Path):
     branch = subprocess.run(
         ["git", "symbolic-ref", "--short", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
-
     summary = summary_line_for_branch(branch)
     if not summary in message:
         message = f"\n{summary}\n{message}"

@@ -1,3 +1,2 @@
 #!/bin/sh
 hookmaster prepare-commit-msg "$@"
-
