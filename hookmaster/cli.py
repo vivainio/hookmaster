@@ -36,7 +36,10 @@ def add_hooks_to_project(path: Path):
     for t in target_paths:
         print("Hooking config file:", t)
         config_file_parsed = parse_config_file(t)
-        render_hooks_by_dict_file(config_file_parsed, t)
+        if config_file_parsed:
+            to_add = {k: f"hookmaster run {k}" for k in config_file_parsed}
+
+            render_hooks_by_dict_file(to_add, t)
 
 
 def summary_line_for_branch(branch: str) -> str:
@@ -68,9 +71,21 @@ def prepare_commit_msg(current_message_file: Path):
         f.write(message)
 
 
+def discover_repo_root(start: Path | None) -> Path | None:
+    if start is None:
+        start = Path.cwd()
+    if start == start.parent:
+        return None
+    if (start / ".git").exists():
+        return start
+    return discover_repo_root(start.parent)
+
+
 def parse_config_file(root_path: Path | None) -> dict[str, str] | None:
     if root_path is None:
-        root_path = Path.cwd()
+        root_path = discover_repo_root(None)
+    if root_path is None:
+        return None
     config_file = root_path / "githooks.toml"
     if not config_file.exists():
         return None
@@ -78,9 +93,10 @@ def parse_config_file(root_path: Path | None) -> dict[str, str] | None:
 
 
 def run_hook_from_config(hook_name: str):
-    commands = parse_config_file(None)
+    repo_root = discover_repo_root(None)
+    commands = parse_config_file(repo_root)
     if not commands:
-        print("No config file found.")
+        print(f"No githooks.toml file found, nothing to do for hook: {hook_name}.")
         return
 
     command = commands.get(hook_name)
@@ -88,7 +104,7 @@ def run_hook_from_config(hook_name: str):
         print(f"Hook {hook_name} not found in config.")
         return
 
-    ret = subprocess.run(command, shell=True, check=False)
+    ret = subprocess.run(command, shell=True, check=False, cwd=repo_root)
     if ret.returncode != 0:
         print(f"Hook {hook_name} failed with code {ret.returncode}.")
         sys.exit(ret.returncode)
