@@ -51,11 +51,9 @@ pre-post = "pytest"
 
 # empty string does nothing in the hook
 commit-msg = ""
-
-pr
 ```
 
-The format should be obvious.
+The format should be obvious. The specified command will always be run in repository root.
 
 The hook created by this will look like:
 
