@@ -12,7 +12,7 @@ your team in git.
 
 ## Installation
 
-```
+```sh
 uv tool install hookmaster
 ```
 
@@ -20,7 +20,7 @@ uv tool install hookmaster
 
 To add 'hookmaster' hooks to all projects under /my/path
 
-```
+```sh
 hookmaster add /my/path
 ```
 
