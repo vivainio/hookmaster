@@ -47,6 +47,12 @@ For any other hooks, you can specify them in githooks.toml:
 
 ```toml
 pre-commit = "python tasks.py format"
+pre-post = "pytest"
+
+# empty string does nothing in the hook
+commit-msg = ""
+
+pr
 ```
 
 The format should be obvious.
@@ -61,3 +67,9 @@ hookmaster run pre-commit
 The command `hookmaster run` will load the `githooks.toml` file, find the hook and run it.
 You can use command `hookmaster run pre-commit` to test the hook without actually committing
 anything.
+
+Usig `githooks.toml` is optional, if you just want to get the commit message hook.
+
+To easily initalize your repo with githooks.toml, run `hookmaster init`. It creates a sample
+githooks.toml and initializes the hooks. Edit the `githooks.toml` file to customize
+your hooks.
