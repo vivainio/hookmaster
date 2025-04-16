@@ -62,7 +62,7 @@ def prepare_commit_msg(current_message_file: Path):
     ).stdout.strip()
     summary = summary_line_for_branch(branch)
     if not summary in message:
-        message = f"\n{summary}\n{message}"
+        message = f"{message}\n{summary}"
 
     with open(current_message_file, "w") as f:
         f.write(message)
