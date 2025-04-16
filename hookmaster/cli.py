@@ -88,7 +88,10 @@ def run_hook_from_config(hook_name: str):
         print(f"Hook {hook_name} not found in config.")
         return
 
-    subprocess.run(command, shell=True, check=True)
+    ret = subprocess.run(command, shell=True, check=False)
+    if ret.returncode != 0:
+        print(f"Hook {hook_name} failed with code {ret.returncode}.")
+        sys.exit(ret.returncode)
 
 
 def main():

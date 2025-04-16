@@ -28,7 +28,6 @@ def do_formatcheck(_args: list[str]) -> None:
     c(["ruff", "format", "--check"])
 
 
-
 def do_lint(_args: list[str]) -> None:
     """Check with ruff"""
     c(["ruff", "check"])
