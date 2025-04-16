@@ -50,3 +50,14 @@ pre-commit = "python tasks.py format"
 ```
 
 The format should be obvious.
+
+The hook created by this will look like:
+
+```sh
+#!/bin/sh
+hookmaster run pre-commit
+```
+
+The command `hookmaster run` will load the `githooks.toml` file, find the hook and run it.
+You can use command `hookmaster run pre-commit` to test the hook without actually committing
+anything.

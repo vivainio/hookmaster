@@ -110,6 +110,27 @@ def run_hook_from_config(hook_name: str):
         sys.exit(ret.returncode)
 
 
+def list_hooks():
+    repo_root = discover_repo_root(None)
+    hooks = repo_root.glob(".git/hooks/*")
+    for hook in hooks:
+        print(">", hook.name)
+        with open(hook, "r") as f:
+            content = f.read()
+        print(content.strip())
+        print()
+
+
+def remove_hooks():
+    repo_root = discover_repo_root(None)
+    hooks = repo_root.glob(".git/hooks/*")
+    for hook in hooks:
+        print("Removing hook:", hook.name)
+        hook.unlink()
+    else:
+        print(f"All hooks removed. Run `hookmaster add {repo_root}` to re-add them.")
+
+
 def main():
     parser = ArgumentParser(description="Hookmaster CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -132,6 +153,9 @@ def main():
     run_cmd = subparsers.add_parser("run", help="Run a hook from githooks.toml")
     run_cmd.add_argument("hook_name", help="Name of the hook to run")
 
+    ls_cmd = subparsers.add_parser("ls", help="List hooks")
+    remove_cmd = subparsers.add_parser("remove", help="Remove hooks")
+
     parsed = parser.parse_args()
 
     if parsed.command == "add":
@@ -144,3 +168,7 @@ def main():
         prepare_commit_msg(Path(parsed.current_message_file))
     elif parsed.command == "run":
         run_hook_from_config(parsed.hook_name)
+    elif parsed.command == "ls":
+        list_hooks()
+    elif parsed.command == "remove":
+        remove_hooks()
