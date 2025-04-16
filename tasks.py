@@ -25,7 +25,10 @@ def do_format(_args: list[str]) -> None:
 
 def do_formatcheck(_args: list[str]) -> None:
     """Reformat all code"""
-    c(["ruff", "format", "--check"])
+    r = c(["ruff", "format", "--check"], check=False)
+    if r != 0:
+        emit("Code is not formatted, run `python tasks.py format` to fix")
+        sys.exit(1)
 
 
 def do_lint(_args: list[str]) -> None:
@@ -56,13 +59,16 @@ emit = print
 
 def c(
     cmd: list[str | Path] | str, check=True, shell=False, cwd: str | Path | None = None
-) -> None:
+) -> int | None:
     """Run a shell command"""
     cmdtext = shlex.join(str(s) for s in cmd) if isinstance(cmd, list) else cmd
     cwd_text = f"{cwd} " if cwd else ""
     cmdtext = f"{cwd_text}> {cmdtext}"
     emit(cmdtext)
-    subprocess.run(cmd, check=check, shell=shell, cwd=cwd)
+    r = subprocess.run(cmd, check=check, shell=shell, cwd=cwd)
+    if not check:
+        return r.returncode
+    return None
 
 
 # scaffolding starts. Do not edit below

@@ -100,8 +100,11 @@ def run_hook_from_config(hook_name: str):
         return
 
     command = commands.get(hook_name)
-    if not command:
+    if command is None:
         print(f"Hook {hook_name} not found in config.")
+        return
+    if command == "":
+        print(f"Hook {hook_name} is empty, nothing to do.")
         return
 
     ret = subprocess.run(command, shell=True, check=False, cwd=repo_root)
@@ -131,6 +134,35 @@ def remove_hooks():
         print(f"All hooks removed. Run `hookmaster add {repo_root}` to re-add them.")
 
 
+githooks_toml_template = """\
+pre-commit = "ruff format --check ."
+# empty hooks are ignored
+pre-push = ""
+"""
+
+
+def init_hookmaster(roots: list[Path] | None = None) -> None:
+    if roots is None:
+        roots = [Path.cwd()]
+    for root in roots:
+        if not root.exists():
+            print(f"Path {root} does not exist.")
+            continue
+        repo_root = discover_repo_root(root)
+        if repo_root is None:
+            print(f"No git repo found in {root}.")
+            continue
+        toml_file = repo_root / "githooks.toml"
+        if toml_file.exists():
+            print(f"githooks.toml already exists in {repo_root}.")
+            continue
+        with toml_file.open("w") as f:
+            f.write(githooks_toml_template)
+
+        add_hooks_to_project(root)
+        print("All done! Edit the congfig file {toml_file} to customize your hooks.")
+
+
 def main():
     parser = ArgumentParser(description="Hookmaster CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -155,6 +187,11 @@ def main():
 
     ls_cmd = subparsers.add_parser("ls", help="List hooks")
     remove_cmd = subparsers.add_parser("remove", help="Remove hooks")
+    init_cmd = subparsers.add_parser(
+        "init",
+        help="Initialize hookmaster for a repo - create sample githooks.toml and register the hooks",
+    )
+    init_cmd.add_argument("path", nargs="?", help="Project path or directory")
 
     parsed = parser.parse_args()
 
@@ -172,3 +209,9 @@ def main():
         list_hooks()
     elif parsed.command == "remove":
         remove_hooks()
+    elif parsed.command == "init":
+        init_hookmaster(
+            [Path(parsed.path).absolute().resolve()] if parsed.path else None
+        )
+    else:
+        parser.print_help()
