@@ -1,1 +1,1 @@
-pre-commit = "python tasks.py format"
+pre-commit = "python tasks.py formatcheck"
