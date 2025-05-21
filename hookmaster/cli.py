@@ -53,7 +53,7 @@ def summary_line_for_branch(branch: str) -> str:
     if len(tail) == 0:
         return ticket
 
-    return f"{ticket}: {tail.strip().strip("-").replace("-", " ").capitalize()}"
+    return f"{ticket}: {tail.strip().strip('-').replace('-', ' ').capitalize()}"
 
 
 def prepare_commit_msg(current_message_file: Path):

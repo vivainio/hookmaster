@@ -110,7 +110,7 @@ def _show_help() -> None:
     tasks.sort()
 
     for index, (name, func) in enumerate(tasks):
-        nametext = f"{index+1:<2} {name}:"
+        nametext = f"{index + 1:<2} {name}:"
 
         if _is_argparse_function(func):
             parser = _collect_args_from_argparse_function(func)
