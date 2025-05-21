@@ -7,7 +7,7 @@ include = ["hookmaster*"]
 
 [project]
 name = "hookmaster"
-version = "1.4.3"
+version = "1.4.4"
 description = "hookmaster"
 readme = "README.md"
 
