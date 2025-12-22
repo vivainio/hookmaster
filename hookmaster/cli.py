@@ -1,4 +1,5 @@
 import re
+import stat
 import subprocess
 import sys
 from argparse import ArgumentParser
@@ -23,7 +24,10 @@ def render_hooks_by_dict_file(hooks_dict: dict[str, str], repo_root: Path) -> No
     for hook_name, cont in hooks_dict.items():
         target_hook_file = repo_root / ".git" / "hooks" / hook_name
         print(">", target_hook_file)
-        target_hook_file.write_text(f"#!/bin/sh\n{cont}\n")
+        target_hook_file.write_text(f"#!/bin/sh\n{cont}\n", newline="\n")
+        target_hook_file.chmod(
+            target_hook_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
 
 
 def add_hooks_to_project(path: Path):
