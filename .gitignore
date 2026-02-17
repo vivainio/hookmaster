@@ -139,3 +139,4 @@ cython_debug/
 
 .idea/
 .aws-sam/
+.githooks/

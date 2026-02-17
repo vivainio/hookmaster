@@ -15,14 +15,11 @@ else:
 always_install_hook_files = {"prepare-commit-msg": 'hookmaster prepare-commit-msg "$@"'}
 
 
-def render_hooks_by_dict_file(hooks_dict: dict[str, str], repo_root: Path) -> None:
-    """Render hooks by dict file.
-
-    Args:
-        hooks_dict (dict[str,str]): Dictionary of hooks to render.
-    """
+def render_hooks(hooks_dict: dict[str, str], hooks_dir: Path) -> None:
+    """Write hook scripts to the given directory."""
+    hooks_dir.mkdir(parents=True, exist_ok=True)
     for hook_name, cont in hooks_dict.items():
-        target_hook_file = repo_root / ".git" / "hooks" / hook_name
+        target_hook_file = hooks_dir / hook_name
         print(">", target_hook_file)
         target_hook_file.write_text(f"#!/bin/sh\n{cont}\n", newline="\n")
         target_hook_file.chmod(
@@ -30,11 +27,38 @@ def render_hooks_by_dict_file(hooks_dict: dict[str, str], repo_root: Path) -> No
         )
 
 
+def ensure_gitignore_entry(repo_root: Path, entry: str) -> None:
+    """Add an entry to .gitignore if not already present."""
+    gitignore = repo_root / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if entry in content.splitlines():
+            return
+        if not content.endswith("\n"):
+            content += "\n"
+    else:
+        content = ""
+    gitignore.write_text(content + entry + "\n")
+
+
+def setup_hooks_dir(repo_root: Path) -> Path:
+    """Set up .githooks/ dir and core.hooksPath for a repo."""
+    hooks_dir = repo_root / ".githooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "core.hooksPath", ".githooks"],
+        check=True,
+    )
+    ensure_gitignore_entry(repo_root, ".githooks/")
+    return hooks_dir
+
+
 def add_hooks_to_project(path: Path):
     target_paths = (p.parent for p in path.glob("**/.git"))
     for t in target_paths:
         print("Hooking directory:", t)
-        render_hooks_by_dict_file(always_install_hook_files, t)
+        hooks_dir = setup_hooks_dir(t)
+        render_hooks(always_install_hook_files, hooks_dir)
 
     target_paths = (p.parent for p in path.glob("**/githooks.toml"))
     for t in target_paths:
@@ -42,8 +66,8 @@ def add_hooks_to_project(path: Path):
         config_file_parsed = parse_config_file(t)
         if config_file_parsed:
             to_add = {k: f"hookmaster run {k}" for k in config_file_parsed}
-
-            render_hooks_by_dict_file(to_add, t)
+            hooks_dir = setup_hooks_dir(t)
+            render_hooks(to_add, hooks_dir)
 
 
 def summary_line_for_branch(branch: str) -> str:
@@ -117,10 +141,25 @@ def run_hook_from_config(hook_name: str):
         sys.exit(ret.returncode)
 
 
+def get_hooks_dir(repo_root: Path) -> Path:
+    """Get the hooks directory, checking core.hooksPath first."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "config", "core.hooksPath"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        hooks_path = Path(result.stdout.strip())
+        if not hooks_path.is_absolute():
+            hooks_path = repo_root / hooks_path
+        return hooks_path
+    return repo_root / ".git" / "hooks"
+
+
 def list_hooks():
     repo_root = discover_repo_root(None)
-    hooks = repo_root.glob(".git/hooks/*")
-    for hook in hooks:
+    hooks_dir = get_hooks_dir(repo_root)
+    for hook in hooks_dir.glob("*"):
         print(">", hook.name)
         with open(hook, "r") as f:
             content = f.read()
@@ -130,12 +169,15 @@ def list_hooks():
 
 def remove_hooks():
     repo_root = discover_repo_root(None)
-    hooks = repo_root.glob(".git/hooks/*")
-    for hook in hooks:
+    hooks_dir = get_hooks_dir(repo_root)
+    for hook in hooks_dir.glob("*"):
         print("Removing hook:", hook.name)
         hook.unlink()
-    else:
-        print(f"All hooks removed. Run `hookmaster add {repo_root}` to re-add them.")
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "--unset", "core.hooksPath"],
+        capture_output=True,
+    )
+    print(f"All hooks removed. Run `hookmaster add {repo_root}` to re-add them.")
 
 
 githooks_toml_template = """\
