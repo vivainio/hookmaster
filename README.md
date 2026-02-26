@@ -66,8 +66,33 @@ The command `hookmaster run` will load the `githooks.toml` file, find the hook a
 You can use command `hookmaster run pre-commit` to test the hook without actually committing
 anything.
 
-Usig `githooks.toml` is optional, if you just want to get the commit message hook.
+Using `githooks.toml` is optional, if you just want to get the commit message hook.
 
-To easily initalize your repo with githooks.toml, run `hookmaster init`. It creates a sample
+To easily initialize your repo with githooks.toml, run `hookmaster init`. It creates a sample
 githooks.toml and initializes the hooks. Edit the `githooks.toml` file to customize
 your hooks.
+
+## Forbidden strings
+
+You can block commits that contain specific literal strings by adding a `[forbidden-strings]` section to `githooks.toml`. This is checked automatically during `pre-commit` against staged files only.
+
+```toml
+[forbidden-strings]
+"<<<<<<< " = "*"
+"console.log" = ["*.py", "*.ts"]
+"binding.pry" = "*.rb"
+```
+
+- **Key**: literal string to search for
+- **Value**: glob pattern(s) — `"*"` for all files, a string for one pattern, or a list for multiple
+
+Example: prevent a private PyPI mirror URL from leaking into `uv.lock`:
+
+```toml
+[forbidden-strings]
+"internal.artifactory.example.com" = "uv.lock"
+```
+
+## How hooks are installed
+
+Hookmaster uses `.githooks/` with `core.hooksPath` instead of writing directly to `.git/hooks/`. This means the hook scripts live in `.githooks/` at the repo root, and git is configured to look there via `git config core.hooksPath .githooks`. The `.githooks/` directory is added to `.gitignore` since the scripts are just thin wrappers that call `hookmaster`. This approach is used instead of `.git/hooks/` because it needs to support git worktrees across the WSL boundary, where `.git/hooks/` may not resolve correctly.
