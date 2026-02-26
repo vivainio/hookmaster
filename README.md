@@ -74,7 +74,7 @@ your hooks.
 
 ## Forbidden strings
 
-You can block commits that contain specific literal strings by adding a `[forbidden-strings]` section to `githooks.toml`. This is checked automatically during `pre-commit` against staged files only.
+You can block commits that contain specific literal strings by adding a `[forbidden-strings]` section to `githooks.toml`. This is checked automatically during `pre-commit` against staged files only. This is a cheap way to prevent AI coding agents from accidentally committing things like merge conflict markers, debug statements, or private URLs — the kind of mistakes that slip through when an agent is committing on your behalf.
 
 ```toml
 [forbidden-strings]
