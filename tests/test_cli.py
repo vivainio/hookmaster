@@ -6,6 +6,7 @@ import pytest
 
 from hookmaster.cli import (
     add_hooks_to_project,
+    check_forbidden_strings,
     ensure_gitignore_entry,
     get_hooks_dir,
     render_hooks,
@@ -145,6 +146,50 @@ class TestAddHooksToProject:
         hook = repo / ".githooks" / "pre-commit"
         assert hook.exists()
         assert "hookmaster run pre-commit" in hook.read_text()
+
+
+def _stage_file(repo, filename, content):
+    """Write a file and stage it."""
+    filepath = repo / filename
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    filepath.write_text(content)
+    subprocess.run(
+        ["git", "-C", str(repo), "add", filename], check=True, capture_output=True
+    )
+
+
+class TestCheckForbiddenStrings:
+    def test_matches_forbidden_string(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "x = 1\n<<<<<<< HEAD\ny = 2\n")
+        assert check_forbidden_strings(repo, {"<<<<<<< ": "*"}) is True
+
+    def test_glob_filters_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "script.js", "console.log('hi')\n")
+        # glob only matches *.py, so script.js should be skipped
+        assert check_forbidden_strings(repo, {"console.log": "*.py"}) is False
+
+    def test_multi_glob(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "app.ts", "console.log('debug')\n")
+        _stage_file(repo, "main.py", "print('ok')\n")
+        assert check_forbidden_strings(repo, {"console.log": ["*.py", "*.ts"]}) is True
+
+    def test_star_matches_all(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "notes.txt", "<<<<<<< HEAD\n")
+        assert check_forbidden_strings(repo, {"<<<<<<< ": "*"}) is True
+
+    def test_no_violations(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "clean.py", "x = 1\ny = 2\n")
+        assert check_forbidden_strings(repo, {"<<<<<<< ": "*"}) is False
+
+    def test_non_matching_glob_skips(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "app.rb", "binding.pry\n")
+        assert check_forbidden_strings(repo, {"binding.pry": "*.py"}) is False
 
 
 class TestGetHooksDir:

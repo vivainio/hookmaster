@@ -3,6 +3,7 @@ import stat
 import subprocess
 import sys
 from argparse import ArgumentParser
+from fnmatch import fnmatch
 from pathlib import Path
 
 if sys.version_info >= (3, 11):
@@ -65,7 +66,11 @@ def add_hooks_to_project(path: Path):
         print("Hooking config file:", t)
         config_file_parsed = parse_config_file(t)
         if config_file_parsed:
-            to_add = {k: f"hookmaster run {k}" for k in config_file_parsed}
+            to_add = {
+                k: f"hookmaster run {k}"
+                for k, v in config_file_parsed.items()
+                if isinstance(v, str)
+            }
             hooks_dir = setup_hooks_dir(t)
             render_hooks(to_add, hooks_dir)
 
@@ -120,6 +125,50 @@ def parse_config_file(root_path: Path | None) -> dict[str, str] | None:
     return tomllib.loads(config_file.read_text())
 
 
+def check_forbidden_strings(
+    repo_root: Path, forbidden: dict[str, str | list[str]]
+) -> bool:
+    """Check staged files for forbidden strings. Returns True if violations found."""
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "diff",
+            "--cached",
+            "--name-only",
+            "--diff-filter=d",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    staged_files = [f for f in result.stdout.strip().splitlines() if f]
+    if not staged_files:
+        return False
+
+    violations = []
+    for pattern_str, globs in forbidden.items():
+        if isinstance(globs, str):
+            globs = [globs]
+        matching_files = [f for f in staged_files if any(fnmatch(f, g) for g in globs)]
+        for filepath in matching_files:
+            content_result = subprocess.run(
+                ["git", "-C", str(repo_root), "show", f":{filepath}"],
+                capture_output=True,
+                text=True,
+            )
+            for line_no, line in enumerate(content_result.stdout.splitlines(), 1):
+                if pattern_str in line:
+                    violations.append((filepath, line_no, pattern_str))
+
+    if violations:
+        print("Forbidden strings found:")
+        for filepath, line_no, matched in violations:
+            print(f"  {filepath}:{line_no} — {matched!r}")
+        return True
+    return False
+
+
 def run_hook_from_config(hook_name: str):
     repo_root = discover_repo_root(None)
     commands = parse_config_file(repo_root)
@@ -127,9 +176,14 @@ def run_hook_from_config(hook_name: str):
         print(f"No githooks.toml file found, nothing to do for hook: {hook_name}.")
         return
 
+    if hook_name == "pre-commit" and "forbidden-strings" in commands:
+        if check_forbidden_strings(repo_root, commands["forbidden-strings"]):
+            sys.exit(1)
+
     command = commands.get(hook_name)
-    if command is None:
-        print(f"Hook {hook_name} not found in config.")
+    if command is None or not isinstance(command, str):
+        if command is None:
+            print(f"Hook {hook_name} not found in config.")
         return
     if command == "":
         print(f"Hook {hook_name} is empty, nothing to do.")
@@ -184,6 +238,13 @@ githooks_toml_template = """\
 pre-commit = "ruff format --check ."
 # empty hooks are ignored
 pre-push = ""
+
+# [forbidden-strings]
+# Checked in staged files during pre-commit.
+# Key = literal string, Value = glob pattern(s) ("*" for all files)
+# "<<<<<<< " = "*"
+# "console.log" = ["*.py", "*.ts"]
+# "binding.pry" = "*.rb"
 """
 
 
