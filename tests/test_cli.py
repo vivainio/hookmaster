@@ -389,3 +389,30 @@ class TestGenerateConfig:
         _stage_file(repo, "githooks.toml", 'allow = ["→", "—", "🎉"]\n')
         config, _ = _parse_generated(repo)
         assert "allow" not in config["ascii-only"]
+
+    def test_exclude_suggested_when_unicode_only_in_tests(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "x = 1\n")
+        _stage_file(repo, "tests/test_unicode.py", "emoji = '🎉'\ncafe = 'café'\n")
+        config, _ = _parse_generated(repo)
+        assert "tests/*" in config["ascii-only"]["exclude"]
+        assert "allow" not in config["ascii-only"]
+
+    def test_no_exclude_when_unicode_in_source_too(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "arrow = '→'\n")
+        _stage_file(repo, "tests/test_unicode.py", "emoji = '🎉'\narrow = '→'\n")
+        config, _ = _parse_generated(repo)
+        # source has unicode too, so only source chars in allow
+        assert "→" in config["ascii-only"]["allow"]
+        # emoji only in tests, not in allow
+        assert "🎉" not in config["ascii-only"]["allow"]
+
+    def test_exclude_suggested_with_source_allow(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "dash = '—'\n")
+        _stage_file(repo, "tests/test_stuff.py", "emoji = '🎉'\n")
+        config, _ = _parse_generated(repo)
+        assert "tests/*" in config["ascii-only"]["exclude"]
+        assert "—" in config["ascii-only"]["allow"]
+        assert "🎉" not in config["ascii-only"]["allow"]

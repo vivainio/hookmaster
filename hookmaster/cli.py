@@ -417,7 +417,11 @@ def generate_config(repo_root: Path) -> str:
 
     # --- ascii-only ---
     # scan git-tracked files for non-ASCII characters already in use
-    existing_chars = set()
+    # track which chars appear only in test dirs vs source
+    test_dir_prefixes = ("test/", "tests/", "test_", "spec/", "specs/")
+    source_chars = set()
+    test_chars = set()
+    test_dirs_with_unicode = set()
     for filepath in tracked_files:
         if filepath == "githooks.toml":
             continue
@@ -427,17 +431,38 @@ def generate_config(repo_root: Path) -> str:
             text = (repo_root / filepath).read_text()
         except (UnicodeDecodeError, OSError):
             continue
-        for ch in text:
-            if ord(ch) > 127:
-                existing_chars.add(ch)
+        file_chars = {ch for ch in text if ord(ch) > 127}
+        if not file_chars:
+            continue
+        is_test = filepath.startswith(test_dir_prefixes) or Path(
+            filepath
+        ).name.startswith("test_")
+        if is_test:
+            test_chars.update(file_chars)
+            # extract the top-level test directory
+            parts = Path(filepath).parts
+            if len(parts) > 1 and parts[0] in ("test", "tests", "spec", "specs"):
+                test_dirs_with_unicode.add(parts[0] + "/*")
+        else:
+            source_chars.update(file_chars)
 
     ascii_globs_str = "[" + ", ".join(f'"{g}"' for g in ascii_globs) + "]"
     lines.append("")
     lines.append("[ascii-only]")
     lines.append(f"files = {ascii_globs_str}")
-    lines.append('# exclude = ["tests/*"]')
-    if existing_chars:
-        sorted_chars = sorted(existing_chars)
+
+    # suggest exclude if test dirs contain unicode not in source
+    test_only_chars = test_chars - source_chars
+    if test_only_chars and test_dirs_with_unicode:
+        exclude_str = (
+            "[" + ", ".join(f'"{d}"' for d in sorted(test_dirs_with_unicode)) + "]"
+        )
+        lines.append(f"exclude = {exclude_str}")
+    else:
+        lines.append('# exclude = ["tests/*"]')
+
+    if source_chars:
+        sorted_chars = sorted(source_chars)
         allow_str = "[" + ", ".join(f'"{ch}"' for ch in sorted_chars) + "]"
         lines.append(f"allow = {allow_str}")
     else:
