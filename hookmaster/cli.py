@@ -125,10 +125,8 @@ def parse_config_file(root_path: Path | None) -> dict[str, str] | None:
     return tomllib.loads(config_file.read_text())
 
 
-def check_forbidden_strings(
-    repo_root: Path, forbidden: dict[str, str | list[str]]
-) -> bool:
-    """Check staged files for forbidden strings. Returns True if violations found."""
+def _get_staged_files(repo_root: Path) -> list[str]:
+    """Return list of staged file paths (excluding deleted)."""
     result = subprocess.run(
         [
             "git",
@@ -142,22 +140,60 @@ def check_forbidden_strings(
         capture_output=True,
         text=True,
     )
-    staged_files = [f for f in result.stdout.strip().splitlines() if f]
-    if not staged_files:
+    return [f for f in result.stdout.strip().splitlines() if f]
+
+
+def _get_tracked_files(repo_root: Path) -> list[str]:
+    """Return list of all tracked file paths."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files"],
+        capture_output=True,
+        text=True,
+    )
+    return [f for f in result.stdout.strip().splitlines() if f]
+
+
+def _read_staged(repo_root: Path, filepath: str) -> str:
+    """Read a file's staged (index) content."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f":{filepath}"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _read_worktree(repo_root: Path, filepath: str) -> str:
+    """Read a file's working tree content."""
+    return (repo_root / filepath).read_text()
+
+
+def check_forbidden_strings(
+    repo_root: Path,
+    forbidden: dict[str, str | list[str]],
+    *,
+    staged_only: bool = True,
+) -> bool:
+    """Check files for forbidden strings. Returns True if violations found."""
+    files = (
+        _get_staged_files(repo_root) if staged_only else _get_tracked_files(repo_root)
+    )
+    if not files:
         return False
+    read_fn = _read_staged if staged_only else _read_worktree
 
     violations = []
     for pattern_str, globs in forbidden.items():
         if isinstance(globs, str):
             globs = [globs]
-        matching_files = [f for f in staged_files if any(fnmatch(f, g) for g in globs)]
+        matching_files = [
+            f
+            for f in files
+            if f != "githooks.toml" and any(fnmatch(f, g) for g in globs)
+        ]
         for filepath in matching_files:
-            content_result = subprocess.run(
-                ["git", "-C", str(repo_root), "show", f":{filepath}"],
-                capture_output=True,
-                text=True,
-            )
-            for line_no, line in enumerate(content_result.stdout.splitlines(), 1):
+            content = read_fn(repo_root, filepath)
+            for line_no, line in enumerate(content.splitlines(), 1):
                 if pattern_str in line:
                     violations.append((filepath, line_no, pattern_str))
 
@@ -165,6 +201,57 @@ def check_forbidden_strings(
         print("Forbidden strings found:")
         for filepath, line_no, matched in violations:
             print(f"  {filepath}:{line_no} — {matched!r}")
+        return True
+    return False
+
+
+def check_ascii_only(
+    repo_root: Path,
+    ascii_only_config: dict,
+    *,
+    staged_only: bool = True,
+) -> bool:
+    """Check files for non-ASCII characters. Returns True if violations found.
+
+    ascii_only_config is the [ascii-only] table with keys:
+        files    - glob patterns to check
+        exclude  - glob patterns to skip
+        allow    - individual characters to permit (e.g. ["→", "—"])
+    """
+    globs = ascii_only_config.get("files", [])
+    if isinstance(globs, str):
+        globs = [globs]
+    if not globs:
+        return False
+    exclude = ascii_only_config.get("exclude", [])
+    if isinstance(exclude, str):
+        exclude = [exclude]
+    exclude.append("githooks.toml")
+    allowed = set(ascii_only_config.get("allow", []))
+    files = (
+        _get_staged_files(repo_root) if staged_only else _get_tracked_files(repo_root)
+    )
+    if not files:
+        return False
+    read_fn = _read_staged if staged_only else _read_worktree
+
+    matching_files = [
+        f
+        for f in files
+        if any(fnmatch(f, g) for g in globs) and not any(fnmatch(f, e) for e in exclude)
+    ]
+    violations = []
+    for filepath in matching_files:
+        content = read_fn(repo_root, filepath)
+        for line_no, line in enumerate(content.splitlines(), 1):
+            for col, ch in enumerate(line, 1):
+                if ord(ch) > 127 and ch not in allowed:
+                    violations.append((filepath, line_no, col, ch))
+
+    if violations:
+        print("Non-ASCII characters found:")
+        for filepath, line_no, col, ch in violations:
+            print(f"  {filepath}:{line_no}:{col} — {ch!r} (U+{ord(ch):04X})")
         return True
     return False
 
@@ -180,6 +267,10 @@ def run_hook_from_config(hook_name: str):
         if check_forbidden_strings(repo_root, commands["forbidden-strings"]):
             sys.exit(1)
 
+    if hook_name == "pre-commit" and "ascii-only" in commands:
+        if check_ascii_only(repo_root, commands["ascii-only"]):
+            sys.exit(1)
+
     command = commands.get(hook_name)
     if command is None or not isinstance(command, str):
         if command is None:
@@ -193,6 +284,31 @@ def run_hook_from_config(hook_name: str):
     if ret.returncode != 0:
         print(f"Hook {hook_name} failed with code {ret.returncode}.")
         sys.exit(ret.returncode)
+
+
+def check_working_tree():
+    """Run all checks against the working tree (not just staged files)."""
+    repo_root = discover_repo_root(None)
+    commands = parse_config_file(repo_root)
+    if not commands:
+        print("No githooks.toml file found.")
+        return
+
+    failed = False
+    if "forbidden-strings" in commands:
+        if check_forbidden_strings(
+            repo_root, commands["forbidden-strings"], staged_only=False
+        ):
+            failed = True
+
+    if "ascii-only" in commands:
+        if check_ascii_only(repo_root, commands["ascii-only"], staged_only=False):
+            failed = True
+
+    if failed:
+        sys.exit(1)
+    else:
+        print("All checks passed.")
 
 
 def get_hooks_dir(repo_root: Path) -> Path:
@@ -234,18 +350,124 @@ def remove_hooks():
     print(f"All hooks removed. Run `hookmaster add {repo_root}` to re-add them.")
 
 
-githooks_toml_template = """\
-pre-commit = "ruff format --check ."
-# empty hooks are ignored
-pre-push = ""
+def generate_config(repo_root: Path) -> str:
+    """Generate a githooks.toml tailored to the repo contents."""
+    tracked = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files"],
+        capture_output=True,
+        text=True,
+    )
+    tracked_files = [f for f in tracked.stdout.strip().splitlines() if f]
 
-# [forbidden-strings]
-# Checked in staged files during pre-commit.
-# Key = literal string, Value = glob pattern(s) ("*" for all files)
-# "<<<<<<< " = "*"
-# "console.log" = ["*.py", "*.ts"]
-# "binding.pry" = "*.rb"
-"""
+    def _has_ext(*exts: str) -> bool:
+        return any(any(f.endswith(ext) for ext in exts) for f in tracked_files)
+
+    has_python = _has_ext(".py")
+    has_js = _has_ext(".js")
+    has_ts = _has_ext(".ts", ".tsx")
+    has_ruby = _has_ext(".rb")
+    has_go = _has_ext(".go")
+    has_rust = _has_ext(".rs")
+    has_shell = _has_ext(".sh")
+
+    # --- pre-commit ---
+    if has_python:
+        pre_commit = "ruff format --check ."
+    elif has_js or has_ts:
+        pre_commit = "npx prettier --check ."
+    elif has_go:
+        pre_commit = "gofmt -l ."
+    elif has_rust:
+        pre_commit = "cargo fmt --check"
+    else:
+        pre_commit = ""
+
+    # --- pre-push ---
+    if has_python:
+        pre_push = "pytest"
+    elif has_js or has_ts:
+        pre_push = "npm test"
+    elif has_go:
+        pre_push = "go test ./..."
+    elif has_rust:
+        pre_push = "cargo test"
+    else:
+        pre_push = ""
+
+    # --- ascii-only (must be before any [section] headers) ---
+    ascii_globs = ["*.toml", "*.yml", "*.yaml", "*.json"]
+    if has_shell:
+        ascii_globs.append("*.sh")
+    if has_python:
+        ascii_globs.append("*.py")
+    if has_js:
+        ascii_globs.append("*.js")
+    if has_ts:
+        ascii_globs.extend(["*.ts", "*.tsx"])
+    if has_ruby:
+        ascii_globs.append("*.rb")
+    if has_go:
+        ascii_globs.append("*.go")
+    if has_rust:
+        ascii_globs.append("*.rs")
+
+    lines = []
+    lines.append(f'pre-commit = "{pre_commit}"')
+    lines.append(f'pre-push = "{pre_push}"')
+
+    # --- ascii-only ---
+    # scan git-tracked files for non-ASCII characters already in use
+    existing_chars = set()
+    for filepath in tracked_files:
+        if filepath == "githooks.toml":
+            continue
+        if not any(fnmatch(filepath, g) for g in ascii_globs):
+            continue
+        try:
+            text = (repo_root / filepath).read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for ch in text:
+            if ord(ch) > 127:
+                existing_chars.add(ch)
+
+    ascii_globs_str = "[" + ", ".join(f'"{g}"' for g in ascii_globs) + "]"
+    lines.append("")
+    lines.append("[ascii-only]")
+    lines.append(f"files = {ascii_globs_str}")
+    lines.append('# exclude = ["tests/*"]')
+    if existing_chars:
+        sorted_chars = sorted(existing_chars)
+        allow_str = "[" + ", ".join(f'"{ch}"' for ch in sorted_chars) + "]"
+        lines.append(f"allow = {allow_str}")
+    else:
+        lines.append('# allow = ["\u2192", "\u2014"]')
+
+    # --- forbidden-strings ---
+    forbidden = {}
+    forbidden["<<<<<<< "] = "*"
+    if has_python:
+        forbidden["breakpoint()"] = "*.py"
+    if has_js or has_ts:
+        js_globs = [g for flag, g in [(has_js, "*.js"), (has_ts, "*.ts")] if flag]
+        forbidden["console.log"] = js_globs
+        forbidden["debugger"] = js_globs
+    if has_ruby:
+        forbidden["binding.pry"] = "*.rb"
+
+    lines.append("")
+    lines.append("[forbidden-strings]")
+    for pattern_str, globs in forbidden.items():
+        if isinstance(globs, list) and len(globs) == 1:
+            globs = globs[0]
+        if isinstance(globs, list):
+            globs_str = "[" + ", ".join(f'"{g}"' for g in globs) + "]"
+        else:
+            globs_str = f'"{globs}"'
+        lines.append(f'"{pattern_str}" = {globs_str}')
+    lines.append("")
+
+    return "\n".join(lines)
 
 
 def init_hookmaster(roots: list[Path] | None = None) -> None:
@@ -263,11 +485,13 @@ def init_hookmaster(roots: list[Path] | None = None) -> None:
         if toml_file.exists():
             print(f"githooks.toml already exists in {repo_root}.")
             continue
+        config = generate_config(repo_root)
         with toml_file.open("w") as f:
-            f.write(githooks_toml_template)
+            f.write(config)
 
+        print(f"Generated {toml_file}:")
+        print(config)
         add_hooks_to_project(root)
-        print("All done! Edit the congfig file {toml_file} to customize your hooks.")
 
 
 def main():
@@ -292,6 +516,9 @@ def main():
     run_cmd = subparsers.add_parser("run", help="Run a hook from githooks.toml")
     run_cmd.add_argument("hook_name", help="Name of the hook to run")
 
+    check_cmd = subparsers.add_parser(
+        "check", help="Run checks against the working tree"
+    )
     ls_cmd = subparsers.add_parser("ls", help="List hooks")
     remove_cmd = subparsers.add_parser("remove", help="Remove hooks")
     init_cmd = subparsers.add_parser(
@@ -312,6 +539,8 @@ def main():
         prepare_commit_msg(Path(parsed.current_message_file))
     elif parsed.command == "run":
         run_hook_from_config(parsed.hook_name)
+    elif parsed.command == "check":
+        check_working_tree()
     elif parsed.command == "ls":
         list_hooks()
     elif parsed.command == "remove":

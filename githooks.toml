@@ -7,3 +7,9 @@ pre-push = "pytest"
 # "<<<<<<< " = "*"
 # "console.log" = ["*.py", "*.ts"]
 # "binding.pry" = "*.rb"
+
+# [ascii-only]
+# Reject non-ASCII characters (emojis, smart quotes, invisible unicode) in staged files.
+# files = ["*.toml", "*.yml", "*.sh", "*.py"]
+# exclude = ["tests/*"]
+# allow = ["→", "—"]

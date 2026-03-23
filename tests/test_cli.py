@@ -1,13 +1,16 @@
 import os
 import stat
 import subprocess
+import sys
 
 import pytest
 
 from hookmaster.cli import (
     add_hooks_to_project,
+    check_ascii_only,
     check_forbidden_strings,
     ensure_gitignore_entry,
+    generate_config,
     get_hooks_dir,
     render_hooks,
     summary_line_for_branch,
@@ -191,6 +194,73 @@ class TestCheckForbiddenStrings:
         _stage_file(repo, "app.rb", "binding.pry\n")
         assert check_forbidden_strings(repo, {"binding.pry": "*.py"}) is False
 
+    def test_githooks_toml_always_excluded(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "githooks.toml", '"<<<<<<< " = "*"\n')
+        assert check_forbidden_strings(repo, {"<<<<<<< ": "*"}) is False
+
+
+class TestCheckAsciiOnly:
+    def test_detects_emoji(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "config.toml", 'name = "hello 🎉"\n')
+        assert check_ascii_only(repo, {"files": ["*.toml"]}) is True
+
+    def test_detects_smart_quotes(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "config.yml", "msg: \u201chello\u201d\n")
+        assert check_ascii_only(repo, {"files": ["*.yml", "*.toml"]}) is True
+
+    def test_passes_clean_ascii(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "config.toml", 'name = "hello"\n')
+        assert check_ascii_only(repo, {"files": ["*.toml"]}) is False
+
+    def test_glob_filters_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "notes.md", "caf\u00e9\n")
+        # glob only matches *.toml, so notes.md should be skipped
+        assert check_ascii_only(repo, {"files": ["*.toml"]}) is False
+
+    def test_multi_glob(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "run.sh", "echo '\u00e9'\n")
+        assert check_ascii_only(repo, {"files": ["*.sh", "*.toml"]}) is True
+
+    def test_no_staged_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        assert check_ascii_only(repo, {"files": ["*"]}) is False
+
+    def test_exclude_skips_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "tests/test_unicode.py", "emoji = '🎉'\n")
+        _stage_file(repo, "main.py", "x = 1\n")
+        assert (
+            check_ascii_only(repo, {"files": ["*.py"], "exclude": ["tests/*"]}) is False
+        )
+
+    def test_exclude_does_not_skip_non_matching(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "src/app.py", "emoji = '🎉'\n")
+        assert (
+            check_ascii_only(repo, {"files": ["*.py"], "exclude": ["tests/*"]}) is True
+        )
+
+    def test_allow_whitelists_characters(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "arrow = '→'\ndash = '—'\n")
+        assert check_ascii_only(repo, {"files": ["*.py"], "allow": ["→", "—"]}) is False
+
+    def test_allow_still_catches_non_allowed(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "arrow = '→'\nemoji = '🎉'\n")
+        assert check_ascii_only(repo, {"files": ["*.py"], "allow": ["→"]}) is True
+
+    def test_githooks_toml_always_excluded(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "githooks.toml", 'allow = ["→", "—"]\n')
+        assert check_ascii_only(repo, {"files": ["*.toml"]}) is False
+
 
 class TestGetHooksDir:
     def test_returns_githooks_when_configured(self, tmp_path):
@@ -205,3 +275,117 @@ class TestGetHooksDir:
     def test_falls_back_to_git_hooks(self, tmp_path):
         repo = _init_git_repo(tmp_path / "myrepo")
         assert get_hooks_dir(repo) == repo / ".git" / "hooks"
+
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+
+def _parse_generated(repo_root):
+    """Generate config and parse it as TOML to verify validity."""
+    raw = generate_config(repo_root)
+    return tomllib.loads(raw), raw
+
+
+class TestGenerateConfig:
+    def test_python_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "print('hi')\n")
+        config, _ = _parse_generated(repo)
+        assert "ruff" in config["pre-commit"]
+        assert "pytest" in config["pre-push"]
+        assert "breakpoint()" in config["forbidden-strings"]
+        assert "*.py" in config["ascii-only"]["files"]
+
+    def test_js_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "index.js", "console.log('hi')\n")
+        config, _ = _parse_generated(repo)
+        assert "prettier" in config["pre-commit"]
+        assert "npm test" in config["pre-push"]
+        assert "console.log" in config["forbidden-strings"]
+        assert "debugger" in config["forbidden-strings"]
+        assert "*.js" in config["ascii-only"]["files"]
+
+    def test_ts_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "app.ts", "const x = 1;\n")
+        config, _ = _parse_generated(repo)
+        assert "prettier" in config["pre-commit"]
+        assert "*.ts" in config["ascii-only"]["files"]
+
+    def test_go_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.go", "package main\n")
+        config, _ = _parse_generated(repo)
+        assert "gofmt" in config["pre-commit"]
+        assert "go test" in config["pre-push"]
+        assert "*.go" in config["ascii-only"]["files"]
+
+    def test_rust_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.rs", "fn main() {}\n")
+        config, _ = _parse_generated(repo)
+        assert "cargo fmt" in config["pre-commit"]
+        assert "cargo test" in config["pre-push"]
+        assert "*.rs" in config["ascii-only"]["files"]
+
+    def test_ruby_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "app.rb", "puts 'hi'\n")
+        config, _ = _parse_generated(repo)
+        assert "binding.pry" in config["forbidden-strings"]
+        assert "*.rb" in config["ascii-only"]["files"]
+
+    def test_empty_repo(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        config, _ = _parse_generated(repo)
+        assert config["pre-commit"] == ""
+        assert config["pre-push"] == ""
+        assert "<<<<<<< " in config["forbidden-strings"]
+        # config files always get ascii-only
+        assert "*.toml" in config["ascii-only"]["files"]
+        assert "*.json" in config["ascii-only"]["files"]
+
+    def test_shell_gets_ascii_only(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "deploy.sh", "#!/bin/sh\n")
+        config, _ = _parse_generated(repo)
+        assert "*.sh" in config["ascii-only"]["files"]
+
+    def test_merge_conflict_marker_always_present(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        config, _ = _parse_generated(repo)
+        assert config["forbidden-strings"]["<<<<<<< "] == "*"
+
+    def test_generated_config_is_valid_toml(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "")
+        _stage_file(repo, "index.js", "")
+        _stage_file(repo, "app.rb", "")
+        _stage_file(repo, "run.sh", "")
+        # should not raise
+        config, raw = _parse_generated(repo)
+        assert isinstance(config, dict)
+
+    def test_allow_populated_from_existing_chars(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "arrow = '→'\ndash = '—'\n")
+        config, _ = _parse_generated(repo)
+        assert "→" in config["ascii-only"]["allow"]
+        assert "—" in config["ascii-only"]["allow"]
+
+    def test_allow_omitted_when_no_non_ascii(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "x = 1\n")
+        config, _ = _parse_generated(repo)
+        assert "allow" not in config["ascii-only"]
+
+    def test_allow_skips_githooks_toml(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "x = 1\n")
+        _stage_file(repo, "githooks.toml", 'allow = ["→", "—", "🎉"]\n')
+        config, _ = _parse_generated(repo)
+        assert "allow" not in config["ascii-only"]
