@@ -6,9 +6,12 @@ import sys
 import pytest
 
 from hookmaster.cli import (
+    _parse_size,
     add_hooks_to_project,
     check_ascii_only,
+    check_do_not_modify,
     check_forbidden_strings,
+    check_max_file_size,
     ensure_gitignore_entry,
     generate_config,
     get_hooks_dir,
@@ -262,6 +265,86 @@ class TestCheckAsciiOnly:
         assert check_ascii_only(repo, {"files": ["*.toml"]}) is False
 
 
+class TestParseSize:
+    def test_bytes(self):
+        assert _parse_size("100B") == 100
+
+    def test_kilobytes(self):
+        assert _parse_size("500KB") == 500 * 1024
+
+    def test_megabytes(self):
+        assert _parse_size("5MB") == 5 * 1024**2
+
+    def test_gigabytes(self):
+        assert _parse_size("1GB") == 1024**3
+
+    def test_lowercase(self):
+        assert _parse_size("5mb") == 5 * 1024**2
+
+    def test_fractional(self):
+        assert _parse_size("1.5MB") == int(1.5 * 1024**2)
+
+    def test_plain_number(self):
+        assert _parse_size("1024") == 1024
+
+
+class TestCheckMaxFileSize:
+    def test_detects_oversized_file(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "big.bin", "x" * 2000)
+        assert check_max_file_size(repo, "1KB") is True
+
+    def test_passes_small_file(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "small.txt", "hello\n")
+        assert check_max_file_size(repo, "1KB") is False
+
+    def test_no_staged_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        assert check_max_file_size(repo, "1KB") is False
+
+    def test_integer_limit(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "big.txt", "x" * 2000)
+        assert check_max_file_size(repo, 1000) is True
+
+    def test_worktree_mode(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "big.txt", "x" * 2000)
+        assert check_max_file_size(repo, "1KB", staged_only=False) is True
+
+
+class TestCheckDoNotModify:
+    def test_blocks_protected_file(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "package-lock.json", "{}")
+        assert check_do_not_modify(repo, ["package-lock.json"]) is True
+
+    def test_allows_unprotected_file(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "main.py", "x = 1\n")
+        assert check_do_not_modify(repo, ["package-lock.json"]) is False
+
+    def test_glob_pattern(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "vendor/lib.py", "x = 1\n")
+        assert check_do_not_modify(repo, ["vendor/*"]) is True
+
+    def test_string_instead_of_list(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "go.sum", "hash\n")
+        assert check_do_not_modify(repo, "go.sum") is True
+
+    def test_no_staged_files(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        assert check_do_not_modify(repo, ["*.lock"]) is False
+
+    def test_worktree_mode(self, tmp_path):
+        repo = _init_git_repo(tmp_path / "repo")
+        _stage_file(repo, "vendor/lib.py", "x = 1\n")
+        assert check_do_not_modify(repo, ["vendor/*"], staged_only=False) is True
+
+
 class TestGetHooksDir:
     def test_returns_githooks_when_configured(self, tmp_path):
         repo = _init_git_repo(tmp_path / "myrepo")
@@ -348,6 +431,8 @@ class TestGenerateConfig:
         # config files always get ascii-only
         assert "*.toml" in config["ascii-only"]["files"]
         assert "*.json" in config["ascii-only"]["files"]
+        # max-file-size always present
+        assert config["max-file-size"] == "1MB"
 
     def test_shell_gets_ascii_only(self, tmp_path):
         repo = _init_git_repo(tmp_path / "repo")

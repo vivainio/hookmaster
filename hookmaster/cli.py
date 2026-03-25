@@ -256,6 +256,98 @@ def check_ascii_only(
     return False
 
 
+def _parse_size(size_str: str) -> int:
+    """Parse a human-readable size string (e.g. '5MB', '500KB') into bytes."""
+    size_str = size_str.strip().upper()
+    units = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+    for suffix, multiplier in sorted(units.items(), key=lambda x: -len(x[0])):
+        if size_str.endswith(suffix):
+            number = size_str[: -len(suffix)].strip()
+            return int(float(number) * multiplier)
+    return int(size_str)
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format bytes into a human-readable string."""
+    if size_bytes >= 1024**3:
+        return f"{size_bytes / 1024**3:.1f}GB"
+    if size_bytes >= 1024**2:
+        return f"{size_bytes / 1024**2:.1f}MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f}KB"
+    return f"{size_bytes}B"
+
+
+def check_max_file_size(
+    repo_root: Path,
+    limit: str | int,
+    *,
+    staged_only: bool = True,
+) -> bool:
+    """Check files against a maximum size limit. Returns True if violations found."""
+    if isinstance(limit, str):
+        limit_bytes = _parse_size(limit)
+    else:
+        limit_bytes = int(limit)
+
+    files = (
+        _get_staged_files(repo_root) if staged_only else _get_tracked_files(repo_root)
+    )
+    if not files:
+        return False
+
+    violations = []
+    for filepath in files:
+        if staged_only:
+            result = subprocess.run(
+                ["git", "-C", str(repo_root), "cat-file", "-s", f":{filepath}"],
+                capture_output=True,
+                text=True,
+            )
+            size = int(result.stdout.strip()) if result.stdout.strip() else 0
+        else:
+            size = (repo_root / filepath).stat().st_size
+        if size > limit_bytes:
+            violations.append((filepath, size))
+
+    if violations:
+        print(f"Files exceed max size ({_format_size(limit_bytes)}):")
+        for filepath, size in violations:
+            print(f"  {filepath} — {_format_size(size)}")
+        print("Use git commit --no-verify to bypass.")
+        return True
+    return False
+
+
+def check_do_not_modify(
+    repo_root: Path,
+    globs: str | list[str],
+    *,
+    staged_only: bool = True,
+) -> bool:
+    """Check that protected files are not being modified. Returns True if violations found."""
+    if isinstance(globs, str):
+        globs = [globs]
+    if not globs:
+        return False
+
+    files = (
+        _get_staged_files(repo_root) if staged_only else _get_tracked_files(repo_root)
+    )
+    if not files:
+        return False
+
+    violations = [f for f in files if any(fnmatch(f, g) for g in globs)]
+
+    if violations:
+        print("Protected files modified:")
+        for filepath in violations:
+            print(f"  {filepath}")
+        print("Use git commit --no-verify to bypass.")
+        return True
+    return False
+
+
 def run_hook_from_config(hook_name: str):
     repo_root = discover_repo_root(None)
     commands = parse_config_file(repo_root)
@@ -269,6 +361,14 @@ def run_hook_from_config(hook_name: str):
 
     if hook_name == "pre-commit" and "ascii-only" in commands:
         if check_ascii_only(repo_root, commands["ascii-only"]):
+            sys.exit(1)
+
+    if hook_name == "pre-commit" and "max-file-size" in commands:
+        if check_max_file_size(repo_root, commands["max-file-size"]):
+            sys.exit(1)
+
+    if hook_name == "pre-commit" and "do-not-modify" in commands:
+        if check_do_not_modify(repo_root, commands["do-not-modify"]):
             sys.exit(1)
 
     command = commands.get(hook_name)
@@ -303,6 +403,14 @@ def check_working_tree():
 
     if "ascii-only" in commands:
         if check_ascii_only(repo_root, commands["ascii-only"], staged_only=False):
+            failed = True
+
+    if "max-file-size" in commands:
+        if check_max_file_size(repo_root, commands["max-file-size"], staged_only=False):
+            failed = True
+
+    if "do-not-modify" in commands:
+        if check_do_not_modify(repo_root, commands["do-not-modify"], staged_only=False):
             failed = True
 
     if failed:
@@ -415,6 +523,9 @@ def generate_config(repo_root: Path) -> str:
     lines.append(f'pre-commit = "{pre_commit}"')
     lines.append(f'pre-push = "{pre_push}"')
 
+    # --- max-file-size ---
+    lines.append('max-file-size = "1MB"')
+
     # --- ascii-only ---
     # scan git-tracked files for non-ASCII characters already in use
     # track which chars appear only in test dirs vs source
@@ -480,6 +591,7 @@ def generate_config(repo_root: Path) -> str:
     if has_ruby:
         forbidden["binding.pry"] = "*.rb"
 
+    # --- forbidden-strings ---
     lines.append("")
     lines.append("[forbidden-strings]")
     for pattern_str, globs in forbidden.items():

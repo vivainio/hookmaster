@@ -43,17 +43,30 @@ This delegates the message creation to globally installed hookmaster application
 
 ## githooks.toml
 
-For any other hooks, you can specify them in githooks.toml:
+You can specify commands to run as git hooks in `githooks.toml` at the repo root:
 
 ```toml
-pre-commit = "python tasks.py format"
-pre-post = "pytest"
+# Top-level keys are git hook names, values are shell commands
+pre-commit = "ruff format --check ."
+pre-push = "pytest"
 
 # empty string does nothing in the hook
 commit-msg = ""
+
+# Optional: block commits with oversized files (accepts KB, MB, GB or plain bytes)
+max-file-size = "1MB"
+
+# Optional: block modifications to specific files or paths
+# do-not-modify = ["package-lock.json", "vendor/*"]
+
+# Optional: block commits containing literal strings in matching files
+[forbidden-strings]
+"<<<<<<< " = "*"                    # all files
+"console.log" = ["*.py", "*.ts"]    # multiple globs
+"binding.pry" = "*.rb"              # single glob
 ```
 
-The format should be obvious. The specified command will always be run in repository root.
+Top-level keys are standard [git hook names](https://git-scm.com/docs/githooks). The value is a shell command run from the repo root. An empty string is ignored. `max-file-size` rejects staged files exceeding the given limit. `do-not-modify` rejects changes to matching paths. Both can be bypassed with `git commit --no-verify`. The `[forbidden-strings]` table is special — keys are literal strings to search for, values are glob pattern(s) to match against staged file paths.
 
 The hook created by this will look like:
 
@@ -74,23 +87,13 @@ your hooks.
 
 ## Forbidden strings
 
-You can block commits that contain specific literal strings by adding a `[forbidden-strings]` section to `githooks.toml`. This is checked automatically during `pre-commit` against staged files only. This is a cheap way to prevent AI coding agents from accidentally committing things like merge conflict markers, debug statements, or private URLs — the kind of mistakes that slip through when an agent is committing on your behalf.
-
-```toml
-[forbidden-strings]
-"<<<<<<< " = "*"
-"console.log" = ["*.py", "*.ts"]
-"binding.pry" = "*.rb"
-```
-
-- **Key**: literal string to search for
-- **Value**: glob pattern(s) — `"*"` for all files, a string for one pattern, or a list for multiple
+The `[forbidden-strings]` section is checked automatically during `pre-commit` against staged files only. This is a cheap way to prevent AI coding agents from accidentally committing things like merge conflict markers, debug statements, or private URLs — the kind of mistakes that slip through when an agent is committing on your behalf.
 
 Example: prevent a private PyPI mirror URL from leaking into `uv.lock`:
 
 ```toml
 [forbidden-strings]
-"internal.artifactory.example.com" = "uv.lock"
+"jfrog.io" = "uv.lock"
 ```
 
 ## How hooks are installed
